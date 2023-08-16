@@ -40,13 +40,22 @@
 #define USBASP_FUNC_TPI_WRITEBLOCK   16
 #define USBASP_FUNC_GETCAPABILITIES 127
 
+#define USBASP_FUNC_PDI_CONNECT    17
+#define USBASP_FUNC_PDI_DISCONNECT 18
+#define USBASP_FUNC_PDI_READ       19
+#define USBASP_FUNC_PDI_SEND       20
+
 /* USBASP capabilities */
 #define USBASP_CAP_TPI    0x01
 #define USBASP_CAP_3MHZ   (1 << 24)   // 3 MHz SCK in UsbAsp-flash firmware
+#define USBASP_CAP_PDI    0x02
 
 /* Block mode flags */
 #define USBASP_BLOCKFLAG_FIRST    1
 #define USBASP_BLOCKFLAG_LAST     2
+
+#define USBASP_PDI_WAIT_BUSY   1
+#define USBASP_PDI_MARK_BUSY   2
 
 /* Block mode data size */
 #define USBASP_READBLOCKSIZE   200

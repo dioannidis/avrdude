@@ -1732,9 +1732,9 @@ programmer
 
 programmer
     id                     = "usbasp";
-    desc                   = "USBasp ISP and TPI programmer";
+    desc                   = "USBasp ISP, TPI and PDI programmer";
     type                   = "usbasp";
-    prog_modes             = PM_TPI | PM_ISP;
+    prog_modes             = PM_TPI | PM_ISP | PM_PDI;
     connection_type        = usb;
     usbvid                 = 0x16c0; # VOTI
     usbpid                 = 0x05dc; # Obdev's free shared PID

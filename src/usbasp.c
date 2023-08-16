@@ -39,6 +39,7 @@
 
 #include "usbasp.h"
 #include "usbdevs.h"
+#include "xmega_pdi.h"
 
 #if defined(HAVE_LIBUSB) || defined(HAVE_LIBUSB_1_0)
 
@@ -133,6 +134,9 @@ static const char *errstr(int result)
 /*
  * Private data for this programmer.
  */
+
+enum UsbAspMode { SPI, TPI, PDI };
+
 struct pdata
 {
 #ifdef USE_LIBUSB_1_0
@@ -142,7 +146,7 @@ struct pdata
 #endif
   int sckfreq_hz;
   unsigned int capabilities;
-  int use_tpi;
+  enum UsbAspMode mode;
   int section_e;
   int sck_3mhz;
 };
@@ -200,64 +204,105 @@ static int usbasp_tpi_paged_write(const PROGRAMMER *pgm, const AVRPART *p, const
 static int usbasp_tpi_set_sck_period(const PROGRAMMER *pgm, double sckperiod);
 static int usbasp_tpi_read_byte(const PROGRAMMER * pgm, const AVRPART *p, const AVRMEM *m, unsigned long addr, unsigned char *value);
 static int usbasp_tpi_write_byte(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m, unsigned long addr, unsigned char data);
-
+// PDI
+static int usbasp_pdi_program_enable(const PROGRAMMER* pgm, const AVRPART* p);
+static int usbasp_pdi_chip_erase(const PROGRAMMER *pgm, const AVRPART *p);
+static int usbasp_pdi_page_erase(PROGRAMMER * pgm, AVRPART * p, AVRMEM * m, unsigned int baseaddr);
+static int usbasp_pdi_paged_load(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m,
+    unsigned int page_size,
+    unsigned int address, unsigned int n_bytes);
+static int usbasp_pdi_paged_write(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m,
+    unsigned int page_size,
+    unsigned int address, unsigned int n_bytes);
+static int usbasp_pdi_set_sck_period(const PROGRAMMER *pgm, double sckperiod);
+static int usbasp_pdi_cmd(const PROGRAMMER * pgm, const unsigned char *cmd, unsigned char *res);
+static int usbasp_pdi_read_byte(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m, unsigned long address, unsigned char *value);
+static int usbasp_pdi_write_byte(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m, unsigned long address, unsigned char data);
 
 // Dispatching wrappers
 
 static int usbasp_cmd(const PROGRAMMER *pgm, const unsigned char *cmd, unsigned char *res) {
-  return PDATA(pgm)->use_tpi?
-    usbasp_tpi_cmd(pgm, cmd, res):
-    usbasp_spi_cmd(pgm, cmd, res);
+
+    switch(PDATA(pgm)->mode)
+    {
+       case SPI: { return usbasp_spi_cmd(pgm, cmd, res); }
+       case TPI: { return usbasp_tpi_cmd(pgm, cmd, res); }
+       case PDI: { return usbasp_pdi_cmd(pgm, cmd, res); }
+    }
 }
 
 static int usbasp_program_enable(const PROGRAMMER *pgm, const AVRPART *p) {
-  return PDATA(pgm)->use_tpi?
-    usbasp_tpi_program_enable(pgm, p):
-    usbasp_spi_program_enable(pgm, p);
+
+    switch (PDATA(pgm)->mode)
+    {
+      case SPI: { return usbasp_spi_program_enable(pgm, p); }
+      case TPI: { return usbasp_tpi_program_enable(pgm, p); }
+      case PDI: { return usbasp_pdi_program_enable(pgm, p); }
+    }
 }
 
 static int usbasp_chip_erase(const PROGRAMMER *pgm, const AVRPART *p) {
-  return PDATA(pgm)->use_tpi?
-    usbasp_tpi_chip_erase(pgm, p):
-    usbasp_spi_chip_erase(pgm, p);
+
+    switch (PDATA(pgm)->mode)
+    {
+      case SPI: { return usbasp_spi_chip_erase(pgm, p); }
+      case TPI: { return usbasp_tpi_chip_erase(pgm, p); }
+      case PDI: { return usbasp_pdi_chip_erase(pgm, p); }
+    }
 }
 
 static int usbasp_paged_load(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m,
   unsigned int page_size, unsigned int addr, unsigned int n_bytes) {
 
-  return PDATA(pgm)->use_tpi?
-    usbasp_tpi_paged_load(pgm, p, m, page_size, addr, n_bytes):
-    usbasp_spi_paged_load(pgm, p, m, page_size, addr, n_bytes);
+    switch (PDATA(pgm)->mode)
+    {
+      case SPI: { return usbasp_spi_paged_load(pgm, p, m, page_size, addr, n_bytes); }
+      case TPI: { return usbasp_tpi_paged_load(pgm, p, m, page_size, addr, n_bytes); }
+      case PDI: { return usbasp_pdi_paged_load(pgm, p, m, page_size, addr, n_bytes); }
+    }
 }
 
 static int usbasp_paged_write(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m,
   unsigned int page_size, unsigned int addr, unsigned int n_bytes) {
 
-  return PDATA(pgm)->use_tpi?
-    usbasp_tpi_paged_write(pgm, p, m, page_size, addr, n_bytes):
-    usbasp_spi_paged_write(pgm, p, m, page_size, addr, n_bytes);
+    switch (PDATA(pgm)->mode)
+    {
+      case SPI: { return usbasp_spi_paged_write(pgm, p, m, page_size, addr, n_bytes); }
+      case TPI: { return usbasp_tpi_paged_write(pgm, p, m, page_size, addr, n_bytes); }
+      case PDI: { return usbasp_pdi_paged_write(pgm, p, m, page_size, addr, n_bytes); }
+    }
 }
 
 static int usbasp_set_sck_period(const PROGRAMMER *pgm, double sckperiod) {
-  return PDATA(pgm)->use_tpi?
-    usbasp_tpi_set_sck_period(pgm, sckperiod):
-    usbasp_spi_set_sck_period(pgm, sckperiod);
+
+    switch (PDATA(pgm)->mode)
+    {
+      case SPI: { return usbasp_spi_set_sck_period(pgm, sckperiod); }
+      case TPI: { return usbasp_tpi_set_sck_period(pgm, sckperiod); }
+      case PDI: { return usbasp_pdi_set_sck_period(pgm, sckperiod); }
+    }
 }
 
 static int usbasp_read_byte(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m,
   unsigned long addr, unsigned char * value) {
 
-  return PDATA(pgm)->use_tpi?
-    usbasp_tpi_read_byte(pgm, p, m, addr, value):
-    avr_read_byte_default(pgm, p, m, addr, value);
+    switch (PDATA(pgm)->mode)
+    {
+      case SPI: { return avr_read_byte_default(pgm, p, m, addr, value); }
+      case TPI: { return usbasp_tpi_read_byte(pgm, p, m, addr, value); }
+      case PDI: { return usbasp_pdi_read_byte(pgm, p, m, addr, value); }
+    }
 }
 
 static int usbasp_write_byte(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m,
   unsigned long addr, unsigned char data) {
 
-  return PDATA(pgm)->use_tpi?
-    usbasp_tpi_write_byte(pgm, p, m, addr, data):
-    avr_write_byte_default(pgm, p, m, addr, data);
+    switch (PDATA(pgm)->mode)
+    {
+      case SPI: { return avr_write_byte_default(pgm, p, m, addr, data); }
+      case TPI: { return usbasp_tpi_write_byte(pgm, p, m, addr, data); }
+      case PDI: { return usbasp_pdi_write_byte(pgm, p, m, addr, data); }
+    }
 }
 
 
@@ -325,6 +370,10 @@ static const char *usbasp_get_funcname(unsigned char functionid)
   case USBASP_FUNC_TPI_RAWWRITE:    return "USBASP_FUNC_TPI_RAWWRITE";    break;
   case USBASP_FUNC_TPI_READBLOCK:   return "USBASP_FUNC_TPI_READBLOCK";   break;
   case USBASP_FUNC_TPI_WRITEBLOCK:  return "USBASP_FUNC_TPI_WRITEBLOCK";  break;
+  case USBASP_FUNC_PDI_CONNECT:     return "USBASP_FUNC_PDI_CONNECT";     break;
+  case USBASP_FUNC_PDI_DISCONNECT:  return "USBASP_FUNC_PDI_DISCONNECT";  break;
+  case USBASP_FUNC_PDI_READ:        return "USBASP_FUNC_PDI_READ";        break;
+  case USBASP_FUNC_PDI_SEND:        return "USBASP_FUNC_PDI_SEND";        break;
   case USBASP_FUNC_GETCAPABILITIES: return "USBASP_FUNC_GETCAPABILITIES"; break;
   default:                          return "Unknown USBASP function";     break;
   }
@@ -604,10 +653,11 @@ static void usbasp_close(PROGRAMMER * pgm)
     unsigned char temp[4];
     memset(temp, 0, sizeof(temp));
 
-    if (PDATA(pgm)->use_tpi) {
-        usbasp_transmit(pgm, 1, USBASP_FUNC_TPI_DISCONNECT, temp, temp, sizeof(temp));
-    } else {
-        usbasp_transmit(pgm, 1, USBASP_FUNC_DISCONNECT, temp, temp, sizeof(temp));
+    switch (PDATA(pgm)->mode)
+    {
+      case SPI: usbasp_transmit(pgm, 1, USBASP_FUNC_DISCONNECT, temp, temp, sizeof(temp));
+      case TPI: usbasp_transmit(pgm, 1, USBASP_FUNC_TPI_DISCONNECT, temp, temp, sizeof(temp));
+      case PDI: usbasp_transmit(pgm, 1, USBASP_FUNC_PDI_DISCONNECT, temp, temp, sizeof(temp));
     }
 
 #ifdef USE_LIBUSB_1_0
@@ -660,32 +710,44 @@ static int usbasp_initialize(const PROGRAMMER *pgm, const AVRPART *p) {
   else
     pdata->capabilities = 0;
 
-  pdata->use_tpi = (pdata->capabilities & USBASP_CAP_TPI) && (p->prog_modes & PM_TPI);
+  pdata->mode = SPI;
+  if ((pdata->capabilities & USBASP_CAP_TPI) && (p->prog_modes & PM_TPI))
+      pdata->mode = TPI;
+  if ((pdata->capabilities & USBASP_CAP_PDI) && (p->prog_modes & PM_PDI))
+      pdata->mode = PDI;
   // query support for 3 MHz SCK in UsbAsp-flash firmware
   // https://github.com/nofeletru/UsbAsp-flash
   pdata->sck_3mhz = ((pdata->capabilities & USBASP_CAP_3MHZ) != 0) ? 1 :0;
 
-  if(pdata->use_tpi)
+  switch (pdata->mode)
   {
-    /* calc tpiclk delay */
-    int dly = 1500000.0 * pgm->bitclock;
-    if(dly < 1)
-        dly = 1;
-    else if(dly > 2047)
-        dly = 2047;
-    temp[0] = dly;
-    temp[1] = dly >> 8;
+    case TPI:
+    {
+       /* calc tpiclk delay */
+        int dly = 1500000.0 * pgm->bitclock;
+        if(dly < 1)
+            dly = 1;
+        else if(dly > 2047)
+            dly = 2047;
+        temp[0] = dly;
+        temp[1] = dly >> 8;
 
-    /* connect */
-    usbasp_transmit(pgm, 1, USBASP_FUNC_TPI_CONNECT, temp, res, sizeof(res));
-  }
-  else
-  {
-    /* set sck period */
-    pgm->set_sck_period(pgm, pgm->bitclock);
+        /* connect */
+        usbasp_transmit(pgm, 1, USBASP_FUNC_TPI_CONNECT, temp, res, sizeof(res));
+    }
+    case SPI:
+    {
+       /* set sck period */
+       pgm->set_sck_period(pgm, pgm->bitclock);
 
-    /* connect to target device */
-    usbasp_transmit(pgm, 1, USBASP_FUNC_CONNECT, temp, res, sizeof(res));
+       /* connect to target device */
+       usbasp_transmit(pgm, 1, USBASP_FUNC_CONNECT, temp, res, sizeof(res));
+    }
+    case PDI:
+    {
+        /* connect to target device */
+        usbasp_transmit(pgm, 1, USBASP_FUNC_PDI_CONNECT, temp, res, sizeof(res));
+    }
   }
 
   /* wait, so device is ready to receive commands */
@@ -1256,6 +1318,252 @@ static int usbasp_tpi_write_byte(const PROGRAMMER *pgm, const AVRPART *p, const 
   return -1;
 }
 
+static int usbasp_pdi_program_enable(const PROGRAMMER* pgm, const AVRPART* p) {
+    return 0;
+}
+
+
+static int usbasp_pdi_paged_load(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m,
+    unsigned int page_size,
+    unsigned int address, unsigned int n_bytes)
+{      
+    uint8_t buf[256];
+    int done = 0;
+    uint8_t* dptr = m->buf + address;
+    uint32_t addr = m->offset + address;
+
+    while (done < n_bytes)
+    {
+        int need = n_bytes - done;
+        if (need > 128) need = 128;
+        int have = usbasp_transmit(pgm, 1, USBASP_FUNC_PDI_READ, (unsigned char*)&addr, buf, need);
+        if (have <= 0)
+        {
+            fprintf(stderr, "%s: paged_load failed\n", progname);
+            return -3;
+        }
+        if (have > need) have = need;
+        memmove(dptr, buf, have);
+        done += have;
+        addr += have;
+        dptr += have;
+    }
+
+    return n_bytes;
+}
+
+static void pdi_nvm_set_reg(uint8_t * *cmd, uint32_t addr, uint8_t value)
+{
+    uint8_t* c = *cmd;
+    c[0] = XNVM_PDI_STS_INSTR | XNVM_PDI_LONG_ADDRESS_MASK | XNVM_PDI_BYTE_DATA_MASK;
+    memmove(c + 1, &addr, 4);
+    c[5] = value;
+    *cmd = c + 6;
+}
+
+static void pdi_set_addr(uint8_t * *cmd, uint32_t addr)
+{
+    uint8_t* c = *cmd;
+    c[0] = XNVM_PDI_ST_INSTR | XNVM_PDI_LD_PTR_ADDRESS_MASK | XNVM_PDI_LONG_DATA_MASK;
+    memmove(c + 1, &addr, 4);
+    *cmd = c + 5;
+}
+
+static int usbasp_pdi_page_erase(PROGRAMMER * pgm, AVRPART * p, AVRMEM * m, unsigned int baseaddr)
+{
+    //printf("pdi page erase 0x%lx\n",baseaddr);
+
+    int eeprom = !strcmp(m->desc, "eeprom");
+
+    uint8_t args[4] = { USBASP_PDI_WAIT_BUSY + USBASP_PDI_MARK_BUSY };
+    uint8_t cmd[20];
+    uint8_t* c = cmd;
+
+    pdi_nvm_set_reg(&c, XNVM_DATA_BASE + XNVM_CONTROLLER_BASE + XNVM_CONTROLLER_CMD_REG_OFFSET,
+        eeprom ? XNVM_CMD_ERASE_EEPROM_PAGE : XNVM_CMD_ERASE_FLASH_PAGE);
+    pdi_set_addr(&c, baseaddr + m->offset);
+    *(c++) = XNVM_PDI_ST_INSTR | XNVM_PDI_LD_PTR_STAR_INC_MASK | XNVM_PDI_BYTE_DATA_MASK;
+    *(c++) = 0;
+
+    int n = c - cmd;
+    if (usbasp_transmit(pgm, 0, USBASP_FUNC_PDI_SEND, args, cmd, n) != n)
+    {
+        fprintf(stderr, "%s: page_erase failed\n", progname);
+        return -1;
+    }
+    else
+        usleep(p->chip_erase_delay);
+
+    return 0;
+
+    /*
+    uint8_t pdi[20]={USBASP_PDI_WAIT_BUSY+USBASP_PDI_HINT_BUSY,
+             XNVM_PDI_STS_INSTR | XNVM_PDI_LONG_ADDRESS_MASK | XNVM_PDI_BYTE_DATA_MASK,
+             0,0,0,0, //2 - cmd reg addr
+             eeprom ? XNVM_CMD_ERASE_EEPROM_PAGE : XNVM_CMD_ERASE_FLASH_PAGE,//6
+
+             XNVM_PDI_ST_INSTR | XNVM_PDI_LD_PTR_ADDRESS_MASK | XNVM_PDI_LONG_DATA_MASK,
+             0,0,0,0,  //8 - base_addr
+             XNVM_PDI_ST_INSTR | XNVM_PDI_LD_PTR_STAR_INC_MASK | XNVM_PDI_BYTE_DATA_MASK,
+             0}; //13
+
+    uint32_t cmd_reg_addr=XNVM_DATA_BASE+XNVM_CONTROLLER_BASE+XNVM_CONTROLLER_CMD_REG_OFFSET;
+    memmove(pdi+2,&cmd_reg_addr,4);
+    uint32_t base_addr=baseaddr+m->offset;
+    memmove(pdi+8,&base_addr,4);
+
+    if (usbasp_transmit(pgm, 0, USBASP_FUNC_PDI_SEND, cmd, pdi, 14)==14)
+        {
+        usleep(p->chip_erase_delay);
+        return 0;
+        }
+
+    return -1;
+    */
+
+}
+
+static int usbasp_pdi_chip_erase(const PROGRAMMER *pgm, const AVRPART *p)
+ {
+    //printf("pdi chip erase\n");
+    uint8_t args[4] = { USBASP_PDI_WAIT_BUSY + USBASP_PDI_MARK_BUSY };
+    uint8_t cmd[20];
+    uint8_t* c = cmd;
+
+    pdi_nvm_set_reg(&c, XNVM_DATA_BASE + XNVM_CONTROLLER_BASE + XNVM_CONTROLLER_CMD_REG_OFFSET, XNVM_CMD_CHIP_ERASE);
+    pdi_nvm_set_reg(&c, XNVM_DATA_BASE + XNVM_CONTROLLER_BASE + XNVM_CONTROLLER_CTRLA_REG_OFFSET, XNVM_CTRLA_CMDEX);
+
+    int n = c - cmd;
+    if (usbasp_transmit(pgm, 0, USBASP_FUNC_PDI_SEND, args, cmd, n) != n)
+    {
+        fprintf(stderr, "%s: chip_erase failed\n", progname);
+        return -1;
+    }
+    else
+        usleep(p->chip_erase_delay);
+
+    return 0;
+}
+
+
+static int usbasp_pdi_paged_write(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m,
+    unsigned int page_size,
+    unsigned int address, unsigned int n_bytes)
+{
+    //printf("pdi paged write  addr=0x%x  offset=0x%x  page_size=0x%x  bytes=0x%x\n",address,m->offset,page_size,n_bytes);
+
+    unsigned char* sptr;
+    int remaining = n_bytes;
+
+    uint32_t a = m->offset + address;
+    sptr = m->buf + address;
+    int eeprom = !strcmp(m->desc, "eeprom");
+
+#define MAXBLOCK 64
+    uint8_t args[4] = { 0 };
+    uint8_t cmd[100];
+    uint8_t* c;
+    int n;
+
+    c = cmd;
+    pdi_nvm_set_reg(&c, XNVM_DATA_BASE + XNVM_CONTROLLER_BASE + XNVM_CONTROLLER_CMD_REG_OFFSET, eeprom ? XNVM_CMD_ERASE_EEPROM_PAGE_BUFFER : XNVM_CMD_ERASE_FLASH_PAGE_BUFFER);
+    pdi_nvm_set_reg(&c, XNVM_DATA_BASE + XNVM_CONTROLLER_BASE + XNVM_CONTROLLER_CTRLA_REG_OFFSET, XNVM_CTRLA_CMDEX);
+    n = c - cmd;
+    //printf("pdi send erase buf\n");
+    args[0] = USBASP_PDI_WAIT_BUSY + USBASP_PDI_MARK_BUSY;
+    if (usbasp_transmit(pgm, 0, USBASP_FUNC_PDI_SEND, args, cmd, n) != n)
+        goto fail;
+
+    while (remaining > 0)
+    {
+        int bsize = remaining;
+        if (bsize > MAXBLOCK)
+            bsize = MAXBLOCK;
+        remaining -= MAXBLOCK;
+
+        c = cmd;
+        pdi_nvm_set_reg(&c, XNVM_DATA_BASE + XNVM_CONTROLLER_BASE + XNVM_CONTROLLER_CMD_REG_OFFSET, eeprom ? XNVM_CMD_LOAD_EEPROM_PAGE_BUFFER : XNVM_CMD_LOAD_FLASH_PAGE_BUFFER);
+        pdi_set_addr(&c, a);
+        *(c++) = XNVM_PDI_REPEAT_INSTR | XNVM_PDI_BYTE_DATA_MASK;
+        *(c++) = bsize - 1;
+        *(c++) = XNVM_PDI_ST_INSTR | XNVM_PDI_LD_PTR_STAR_INC_MASK | XNVM_PDI_BYTE_DATA_MASK;
+        memmove(c, sptr, bsize); c += bsize;
+
+        args[0] = USBASP_PDI_WAIT_BUSY;
+        n = c - cmd;
+        //	printf("pdi send load buf 0x%lx\n",a);
+        if (usbasp_transmit(pgm, 0, USBASP_FUNC_PDI_SEND, args, cmd, n) != n)
+            goto fail;
+
+        a += bsize;
+        sptr += bsize;
+    }
+
+    c = cmd;
+    pdi_nvm_set_reg(&c, XNVM_DATA_BASE + XNVM_CONTROLLER_BASE + XNVM_CONTROLLER_CMD_REG_OFFSET, eeprom ? XNVM_CMD_WRITE_EEPROM_PAGE : XNVM_CMD_WRITE_FLASH_PAGE);
+    a = m->offset + address;
+    pdi_set_addr(&c, a);
+    *(c++) = XNVM_PDI_ST_INSTR | XNVM_PDI_LD_PTR_STAR_INC_MASK | XNVM_PDI_BYTE_DATA_MASK;
+    *(c++) = 0;
+
+    args[0] = USBASP_PDI_WAIT_BUSY + USBASP_PDI_MARK_BUSY;
+    n = c - cmd;
+    //printf("pdi send write page 0x%lx\n",a);
+    if (usbasp_transmit(pgm, 0, USBASP_FUNC_PDI_SEND, args, cmd, n) != n)
+        goto fail;
+
+    return n_bytes;
+
+fail:
+    fprintf(stderr, "%s: paged_write failed\n", progname);
+    return -3;
+
+}
+
+static int usbasp_pdi_set_sck_period(const PROGRAMMER * pgm, double sckperiod)
+{
+    //printf("pdi set sck period (NOP)\n");
+    return 0;
+}
+
+static int usbasp_pdi_cmd(const PROGRAMMER *pgm, const unsigned char *cmd, unsigned char *res)
+{
+    fprintf(stderr, "pdi cmd not implemented\n");
+    return -1;
+}
+
+static int usbasp_pdi_read_byte(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m, unsigned long address, unsigned char *value)
+{
+    //printf("pdi read byte:  addr=0x%lx offset=0x%x\n",addr,m->offset);
+
+    uint32_t a = m->offset + address;
+    if (usbasp_transmit(pgm, 1, USBASP_FUNC_PDI_READ, (unsigned char*)&a, value, 1) == 1)
+        return 0;
+    return -1;
+}
+
+static int usbasp_pdi_write_byte(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m, unsigned long address, unsigned char data)
+{
+    //printf("pdi write byte 0x%lx 0x%x\n",addr+m->offset,data);
+
+    uint8_t args[4] = { USBASP_PDI_WAIT_BUSY + USBASP_PDI_MARK_BUSY };
+    uint8_t cmd[20];
+    uint8_t* c = cmd;
+    uint32_t a = address + m->offset;
+
+    pdi_nvm_set_reg(&c, XNVM_DATA_BASE + XNVM_CONTROLLER_BASE + XNVM_CONTROLLER_CMD_REG_OFFSET, XNVM_CMD_WRITE_FUSE);
+    *(c++) = XNVM_PDI_STS_INSTR | XNVM_PDI_LONG_ADDRESS_MASK | XNVM_PDI_BYTE_DATA_MASK;
+    memmove(c, &a, 4); c += 4;
+    *(c++) = data;
+
+    int n = c - cmd;
+    if (usbasp_transmit(pgm, 0, USBASP_FUNC_PDI_SEND, args, cmd, n) != n)
+    {
+        fprintf(stderr, "%s: write_byte failed\n", progname);
+        return -1;
+    }
+    return 0;
+}
 
 void usbasp_initpgm(PROGRAMMER *pgm) {
   strcpy(pgm->type, "usbasp");
