@@ -1328,7 +1328,7 @@ static int usbasp_pdi_program_enable(const PROGRAMMER* pgm, const AVRPART* p) {
 
     cmd[0] = 0;
 
-    pmsg_debug("usbasp_program_pdi_enable()\n");
+    pmsg_debug("usbasp_program_enable()\n");
 
     int nbytes =
         usbasp_transmit(pgm, 1, USBASP_FUNC_PDI_ENABLEPROG, cmd, res, sizeof(res));
@@ -1345,6 +1345,9 @@ static int usbasp_pdi_paged_load(const PROGRAMMER *pgm, const AVRPART *p, const 
     unsigned int page_size,
     unsigned int address, unsigned int n_bytes)
 {      
+
+    pmsg_debug("usbasp_pdi_paged_load()\n");
+
     uint8_t buf[256];
     int done = 0;
     uint8_t* dptr = m->buf + address;
@@ -1357,7 +1360,7 @@ static int usbasp_pdi_paged_load(const PROGRAMMER *pgm, const AVRPART *p, const 
         int have = usbasp_transmit(pgm, 1, USBASP_FUNC_PDI_READ, (unsigned char*)&addr, buf, need);
         if (have <= 0)
         {
-            fprintf(stderr, "%s: paged_load failed\n", progname);
+            //fprintf(stderr, "%s: paged_load failed\n", progname);
             return -3;
         }
         if (have > need) have = need;
@@ -1372,6 +1375,8 @@ static int usbasp_pdi_paged_load(const PROGRAMMER *pgm, const AVRPART *p, const 
 
 static void pdi_nvm_set_reg(uint8_t * *cmd, uint32_t addr, uint8_t value)
 {
+    pmsg_debug("pdi_nvm_set_reg()\n");
+
     uint8_t* c = *cmd;
     c[0] = XNVM_PDI_STS_INSTR | XNVM_PDI_LONG_ADDRESS_MASK | XNVM_PDI_BYTE_DATA_MASK;
     memmove(c + 1, &addr, 4);
@@ -1381,6 +1386,8 @@ static void pdi_nvm_set_reg(uint8_t * *cmd, uint32_t addr, uint8_t value)
 
 static void pdi_set_addr(uint8_t * *cmd, uint32_t addr)
 {
+    pmsg_debug("pdi_set_addr()\n");
+
     uint8_t* c = *cmd;
     c[0] = XNVM_PDI_ST_INSTR | XNVM_PDI_LD_PTR_ADDRESS_MASK | XNVM_PDI_LONG_DATA_MASK;
     memmove(c + 1, &addr, 4);
@@ -1389,6 +1396,8 @@ static void pdi_set_addr(uint8_t * *cmd, uint32_t addr)
 
 static int usbasp_pdi_page_erase(PROGRAMMER * pgm, AVRPART * p, AVRMEM * m, unsigned int baseaddr)
 {
+    pmsg_debug("usbasp_pdi_page_erase()\n");
+
     //printf("pdi page erase 0x%lx\n",baseaddr);
 
     int eeprom = !strcmp(m->desc, "eeprom");
@@ -1406,7 +1415,7 @@ static int usbasp_pdi_page_erase(PROGRAMMER * pgm, AVRPART * p, AVRMEM * m, unsi
     int n = c - cmd;
     if (usbasp_transmit(pgm, 0, USBASP_FUNC_PDI_WRITE, args, cmd, n) != n)
     {
-        fprintf(stderr, "%s: page_erase failed\n", progname);
+        //fprintf(stderr, "%s: page_erase failed\n", progname);
         return -1;
     }
     else
@@ -1443,6 +1452,9 @@ static int usbasp_pdi_page_erase(PROGRAMMER * pgm, AVRPART * p, AVRMEM * m, unsi
 
 static int usbasp_pdi_chip_erase(const PROGRAMMER *pgm, const AVRPART *p)
  {
+
+    pmsg_debug("usbasp_pdi_chip_erase()\n");
+
     //printf("pdi chip erase\n");
     uint8_t args[4] = { USBASP_PDI_WAIT_BUSY + USBASP_PDI_MARK_BUSY };
     uint8_t cmd[20];
@@ -1468,6 +1480,8 @@ static int usbasp_pdi_paged_write(const PROGRAMMER *pgm, const AVRPART *p, const
     unsigned int page_size,
     unsigned int address, unsigned int n_bytes)
 {
+    pmsg_debug("usbasp_pdi_paged_write()\n");
+
     //printf("pdi paged write  addr=0x%x  offset=0x%x  page_size=0x%x  bytes=0x%x\n",address,m->offset,page_size,n_bytes);
 
     unsigned char* sptr;
@@ -1533,25 +1547,30 @@ static int usbasp_pdi_paged_write(const PROGRAMMER *pgm, const AVRPART *p, const
     return n_bytes;
 
 fail:
-    fprintf(stderr, "%s: paged_write failed\n", progname);
+    //fprintf(stderr, "%s: paged_write failed\n", progname);
     return -3;
 
 }
 
 static int usbasp_pdi_set_sck_period(const PROGRAMMER * pgm, double sckperiod)
 {
+    pmsg_debug("usbasp_pdi_set_sck_period()\n");
+
     //printf("pdi set sck period (NOP)\n");
     return 0;
 }
 
 static int usbasp_pdi_cmd(const PROGRAMMER *pgm, const unsigned char *cmd, unsigned char *res)
 {
-    fprintf(stderr, "pdi cmd not implemented\n");
+    pmsg_debug("usbasp_pdi_cmd()\n");
+
+    //fprintf(stderr, "pdi cmd not implemented\n");
     return -1;
 }
 
 static int usbasp_pdi_read_byte(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m, unsigned long address, unsigned char *value)
 {
+
     pmsg_debug("usbasp_pdi_read_byte(\"%s\", 0x%0lx)\n", m->offset, address);
 
     uint32_t a = m->offset + address;
@@ -1566,6 +1585,8 @@ static int usbasp_pdi_read_byte(const PROGRAMMER *pgm, const AVRPART *p, const A
 
 static int usbasp_pdi_write_byte(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m, unsigned long address, unsigned char data)
 {
+    pmsg_debug("usbasp_pdi_write_byte()");
+
     //printf("pdi write byte 0x%lx 0x%x\n",addr+m->offset,data);
 
     uint8_t args[4] = { USBASP_PDI_WAIT_BUSY + USBASP_PDI_MARK_BUSY };
@@ -1581,7 +1602,7 @@ static int usbasp_pdi_write_byte(const PROGRAMMER *pgm, const AVRPART *p, const 
     int n = c - cmd;
     if (usbasp_transmit(pgm, 0, USBASP_FUNC_PDI_WRITE, args, cmd, n) != n)
     {
-        fprintf(stderr, "%s: write_byte failed\n", progname);
+        //fprintf(stderr, "%s: write_byte failed\n", progname);
         return -1;
     }
     return 0;
