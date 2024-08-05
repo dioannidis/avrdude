@@ -747,12 +747,18 @@ static int usbasp_initialize(const PROGRAMMER *pgm, const AVRPART *p) {
     case PDI:
     {
         /* connect to target device */
-        usbasp_transmit(pgm, 1, USBASP_FUNC_PDI_CONNECT, temp, res, sizeof(res));
+        int nbytes = usbasp_transmit(pgm, 1, USBASP_FUNC_PDI_CONNECT, temp, res, sizeof(res));
+        if ((nbytes != 2) | (res[0] != 0)) {
+            pmsg_error("cannot set guard time (0x%02x)\n", res[0]);
+            return -1;
+        }
     }
   }
 
-  /* wait, so device is ready to receive commands */
-  usleep(100000);
+  /* If not PDI
+  * wait, so device is ready to receive commands */
+  if(pdata->mode != PDI)
+    usleep(100000);
 
   return pgm->program_enable(pgm, p);
 }
@@ -1334,7 +1340,7 @@ static int usbasp_pdi_program_enable(const PROGRAMMER* pgm, const AVRPART* p) {
         usbasp_transmit(pgm, 1, USBASP_FUNC_PDI_ENABLEPROG, cmd, res, sizeof(res));
 
     if ((nbytes != 1) | (res[0] != 0)) {
-        pmsg_error("program enable: target does not answer (0x%02x)\n", res[0]);
+        pmsg_error("target does not answer (0x%02x)\n", res[0]);
         return -1;
     }
 
@@ -1571,7 +1577,7 @@ static int usbasp_pdi_cmd(const PROGRAMMER *pgm, const unsigned char *cmd, unsig
 static int usbasp_pdi_read_byte(const PROGRAMMER *pgm, const AVRPART *p, const AVRMEM *m, unsigned long address, unsigned char *value)
 {
 
-    pmsg_debug("usbasp_pdi_read_byte(\"%s\", 0x%0lx)\n", m->offset, address);
+    //pmsg_debug("usbasp_pdi_read_byte(\"%s\", 0x%0lx)\n", m->offset, address);
 
     uint32_t a = m->offset + address;
     int n = usbasp_transmit(pgm, 1, USBASP_FUNC_PDI_READ, (unsigned char*)&a, value, 1);
